@@ -8,14 +8,14 @@ import io
 import matplotlib.pyplot as plt
 
 # Imports specifically so we can render outputs in Colab.
-def display_frames_as_gif(frame):
+def display_frames_as_gif(frame, intv=30):
     """Displays a list of frames as a gif, with controls."""
     fig = plt.figure()
     patch = plt.imshow(frame[0].astype(int))
     def animate(i):
         patch.set_data(frame[i].astype(int))
     anim = animation.FuncAnimation(
-        fig, animate, frames=len(frame), interval=60, blit=False
+        fig, animate, frames=len(frame), interval=intv, blit=False
     )
     #display(display_animation(anim, default_mode='loop'))
     # Set up formatting for the movie files
