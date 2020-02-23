@@ -97,6 +97,7 @@ class NoiseMaker():
         return noise * eps
     
 import collections
+import random
 
 class Replay:
     def __init__(self, size):
@@ -111,3 +112,6 @@ class Replay:
     def sample(self, size):
         if len(self.memory) >= size:
             return random.sample(self.memory, size)
+    
+    def __len__(self):
+        return len(self.memory)
