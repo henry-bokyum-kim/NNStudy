@@ -38,7 +38,7 @@ class Agent:
             
         while True:
             with torch.no_grad():
-                act_v = self.actor(torch.FloatTensor(self.obs).to(self.device)).cpu().numpy()
+                act_v = self.actor(torch.FloatTensor([self.obs]).to(self.device)).cpu().numpy()
                 if self.noise is not None:
                     act_v += self.noise.get_noise()
                 if self.env.action_space.shape:
