@@ -47,7 +47,8 @@ class Agent:
         buffer = []
         self.obs = self.env.reset()
         self.render(epoch)
-            
+
+        total_rew = 0
         while True:
             with torch.no_grad():
                 act_v = self.actor(torch.FloatTensor([self.obs])                                   .to(self.device)).cpu().squeeze().numpy()
@@ -58,6 +59,7 @@ class Agent:
                 act = self.actor.get_action(act_v)
 
             next_obs, rew, done, etc = self.env.step(act)
+            total_rew += rew
             self.render(epoch)
 
             obs = self.obs
@@ -76,7 +78,7 @@ class Agent:
         while len(buffer):
             yield self.unroll_step(buffer)
             buffer.pop(0)
-            
+        print(epoch, "%.5f"%total_rew, end=' ')
         return
 
     def unroll_step(self, buffer):
@@ -91,7 +93,7 @@ class Agent:
             rew_sum+=r
             
         done = buffer[-1].done if len(buffer) == self.n_step else True
-        return StepInfo(buffer[0].obs, buffer[0].act_v, buffer[0].act, buffer[-1].last_obs,                        rew_sum, done, buffer[0].etc, len(buffer))
+        return StepInfo(buffer[0].obs, buffer[0].act_v, buffer[0].act, buffer[-1].last_obs, rew_sum, done, buffer[0].etc, len(buffer))
 
 import numpy as np
 import math
@@ -120,11 +122,11 @@ class NoiseMaker():
             self.param = param
             
     def get_noise(self):
-        eps = self.param["end"] + (self.param["start"] - self.param["end"])                 * math.exp(-1*self.count/ self.param["decay"])
+        eps = self.param["end"] + (self.param["start"] - self.param["end"]) * math.exp(-1*self.count/ self.param["decay"])
         
         noise = np.random.normal(size=self.action_size)
         if self.type == "ou":
-            self.state += self.param["ou_th"] * (self.param["ou_mu"] - self.state)                         + self.param["ou_sig"] * noise
+            self.state += self.param["ou_th"] * (self.param["ou_mu"] - self.state) + self.param["ou_sig"] * noise
             noise = self.state
         if not self.decay:
             eps = 1
@@ -159,7 +161,11 @@ class Replay:
         
     def sample(self, size):
         if self.prio:
-            probs = np.array(self.priorities, dtype=np.float32) ** self.alph
+            probs = np.array(self.priorities, dtype=np.float32)
+            min_prio = np.array(self.priorities).min()
+            if min_prio < 1:
+                probs /= min_prio
+            probs = probs ** self.alph
             probs /= probs.sum()
         else:
             probs = np.ones(len(self),) / len(self)
