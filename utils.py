@@ -51,7 +51,7 @@ class Agent:
         total_rew = 0
         while True:
             with torch.no_grad():
-                act_v = self.actor(torch.FloatTensor([self.obs])                                   .to(self.device)).cpu().squeeze().numpy()
+                act_v = self.actor(torch.FloatTensor([self.obs])                                   .to(self.device)).cpu().squeeze(0).numpy()
                 if self.noise is not None:
                     act_v += self.noise.get_noise()
                 if self.env.action_space.shape:
@@ -182,7 +182,7 @@ class Replay:
     def update_priorities(self, indices, prios):
         if not self.prio:
             return
-        prios += 1e-6
+        prios += 1e-8
         for idx, prio in zip(indices,prios):
             self.priorities[idx] = prio
     
