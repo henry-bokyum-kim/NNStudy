@@ -7,7 +7,7 @@ version = "1.0.0"
 StepInfo = namedtuple("StepInfo", ("obs", "act_v", "act", "last_obs", "rew", "done", "etc", "n"))
 
 class Agent:
-    def __init__(self, env, actor, noise = None, rend_wait = -1, rend_interval = -1                  , frame = None, max_step = None, device = None):
+    def __init__(self, env, actor, noise = None, max_step = None, device = None):
         self.env = env
         if max_step is not None:
             self.env._max_episode_steps = max_step
@@ -17,18 +17,27 @@ class Agent:
         self.noise = noise
         self.device = device
         
-        self.wait = rend_wait
-        self.interval = rend_interval
-        self.frame = frame
+        self.wait = -1
+        self.interval = -1
+        self.frame = None
         
         self.step_set = False
         self.n_step = 1
         self.gamma = 0.99
+        self.scale_factor = 1
+        self.bias=0
         
-    def set_n_step(self, n, gamma):
+    def prepare(self, step_unroll, gamma, scale=1, bias=0):
         self.step_set = True
-        self.n_step = n
+        self.n_step = step_unroll
         self.gamma= gamma
+        self.scale_factor = scale
+        self.bias=bias
+        
+    def set_renderer(self, rend_wait=0, rend_interval=1, frame = None):
+        self.wait = rend_wait
+        self.interval = rend_interval
+        self.frame = frame
         
     def reset(self):
         self.env.close()
@@ -59,6 +68,8 @@ class Agent:
                 act = self.actor.get_action(act_v)
 
             next_obs, rew, done, etc = self.env.step(act)
+            rew += self.bias
+            rew /= self.scale_factor
             total_rew += rew
             self.render(epoch)
 
