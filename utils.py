@@ -1,5 +1,7 @@
 import gym
 import torch
+import numpy as np
+import time
 from collections import namedtuple
 
 version = "1.0.0"
@@ -7,15 +9,12 @@ version = "1.0.0"
 StepInfo = namedtuple("StepInfo", ("obs", "act_v", "noise_v", "act", "last_obs", "rew", "done", "etc", "n"))
 
 class Agent:
-    def __init__(self, env, actor, noise = None, max_step = None, device = None):
+    def __init__(self, env, actor, noise = None, max_step = None):
         self.env = env
         if max_step is not None:
-            self.env._max_episode_steps = max_step
-        if device is None:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")            
+            self.env._max_episode_steps = max_step           
         self.actor = actor
         self.noise = noise
-        self.device = device
         
         self.wait = -1
         self.interval = -1
@@ -27,12 +26,13 @@ class Agent:
         self.scale_factor = 1
         self.bias=0
         
-    def prepare(self, step_unroll, gamma, scale=1, bias=0):
+    def prepare(self, step_unroll, gamma, cnn=False, scale=1, bias=0):
         self.step_set = True
         self.n_step = step_unroll
         self.gamma= gamma
         self.scale_factor = scale
         self.bias=bias
+        self.cnn = cnn
         
     def set_renderer(self, rend_wait=0, rend_interval=1, frame = None):
         self.wait = rend_wait
@@ -53,26 +53,33 @@ class Agent:
         
     def episode(self, epoch):
         assert self.step_set
+        t=time.time()
         buffer = []
         self.obs = self.env.reset()
-        self.render(epoch)
+        if self.cnn:
+            self.obs = self.actor.convert_input(self.env.render("rgb_array"))
+        else:
+            self.render(epoch)
 
         total_rew = 0
         total_rew_scaled = 0
         count = 0
         while True:
             with torch.no_grad():
-                act_v = self.actor(torch.FloatTensor([self.obs]).to(self.device)).cpu().squeeze(0).numpy()
+                out = self.actor([self.obs])
+                act_v = out[0] if type(out) is tuple else out
+                act_v = act_v.cpu().squeeze(0).numpy()
                 if self.noise is not None:
                     noise_v = act_v + self.noise.get_noise()
                 else:
                     noise_v = act_v
                 if self.env.action_space.shape:
                     noise_v = noise_v.clip(self.env.action_space.low, self.env.action_space.high)
-                act = self.actor.get_action(noise_v)
+                act = self.actor.convert_to_action(noise_v)
 
             next_obs, rew, done, etc = self.env.step(act)
             obs = self.obs
+            next_obs = self.actor.convert_input(self.env.render("rgb_array")) if self.cnn else next_obs
             self.obs = next_obs
             count += 1
 
@@ -96,7 +103,7 @@ class Agent:
         while len(buffer):
             yield self.unroll_step(buffer)
             buffer.pop(0)
-        print("ep#%4d"%epoch, "count : %4d, scaled_rew : %03.5f total_rew :%03.5f"%(count, total_rew, total_rew_scaled))
+        print("ep#%4d"%epoch, "elapsed : %.2f, count : %4d, scaled_rew : %03.5f, total_rew : %03.5f"%(time.time()-t, count, total_rew, total_rew_scaled))
         return
 
     def unroll_step(self, buffer):
@@ -158,8 +165,9 @@ import numpy as np
 import math
 
 class Replay:
-    def __init__(self, size, prio = False, alph = 0.6, beta = 0.4):
+    def __init__(self, init, size, prio = False, alph = 0.6, beta = 0.4):
         self.memory = collections.deque(maxlen = size)
+        self.init = init
         self.size = size
         self.priorities = collections.deque(maxlen = size)
         self.prio = prio
@@ -174,8 +182,8 @@ class Replay:
             max_prio = np.array(self.priorities).max() if len(self.priorities) else 1.
             self.priorities.append(max_prio)
         
-    def prepare(self, env):
-        pass
+    def is_ready(self):
+        return len(self) >= self.init
         
     def sample(self, size):
         if self.prio:
@@ -206,3 +214,22 @@ class Replay:
     
     def __len__(self):
         return len(self.memory)
+    
+import torch.nn as nn
+import copy
+
+class targetNet(nn.Module):
+    def __init__(self, off_net):
+        super(targetNet, self).__init__()
+        self.net = copy.deepcopy(off_net)
+        self.off_net = off_net
+        
+    def alpha_update(self, alpha = 0.05):
+        for off, tgt in zip(self.off_net.parameters(), self.net.parameters()):
+            tgt.data.copy_(off.data*alpha + tgt.data*(1-alpha))
+    
+    def copy_off_net(self):
+        self.net.load_state_dict(self.off_net.state_dict())
+    
+    def forward(self, *x):
+        return self.net(*x)
