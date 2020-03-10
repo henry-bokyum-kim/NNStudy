@@ -4,7 +4,7 @@ from collections import namedtuple
 
 version = "1.0.0"
 
-StepInfo = namedtuple("StepInfo", ("obs", "act_v", "act", "last_obs", "rew", "done", "etc", "n"))
+StepInfo = namedtuple("StepInfo", ("obs", "act_v", "noise_v", "act", "last_obs", "rew", "done", "etc", "n"))
 
 class Agent:
     def __init__(self, env, actor, noise = None, max_step = None, device = None):
@@ -58,25 +58,32 @@ class Agent:
         self.render(epoch)
 
         total_rew = 0
+        total_rew_scaled = 0
+        count = 0
         while True:
             with torch.no_grad():
-                act_v = self.actor(torch.FloatTensor([self.obs])                                   .to(self.device)).cpu().squeeze(0).numpy()
+                act_v = self.actor(torch.FloatTensor([self.obs]).to(self.device)).cpu().squeeze(0).numpy()
                 if self.noise is not None:
-                    act_v += self.noise.get_noise()
+                    noise_v = act_v + self.noise.get_noise()
+                else:
+                    noise_v = act_v
                 if self.env.action_space.shape:
-                    act_v = act_v.clip(self.env.action_space.low, self.env.action_space.high)
-                act = self.actor.get_action(act_v)
+                    noise_v = noise_v.clip(self.env.action_space.low, self.env.action_space.high)
+                act = self.actor.get_action(noise_v)
 
             next_obs, rew, done, etc = self.env.step(act)
+            obs = self.obs
+            self.obs = next_obs
+            count += 1
+
+            total_rew_scaled += rew
             rew += self.bias
             rew /= self.scale_factor
             total_rew += rew
+
             self.render(epoch)
 
-            obs = self.obs
-            self.obs = next_obs
-
-            buffer.append(StepInfo(obs, act_v, act, next_obs, rew, done, etc, -1))
+            buffer.append(StepInfo(obs, act_v, noise_v, act, next_obs, rew, done, etc, -1))
             if done:
                 break
                 
@@ -89,7 +96,7 @@ class Agent:
         while len(buffer):
             yield self.unroll_step(buffer)
             buffer.pop(0)
-        print(epoch, "%.5f"%total_rew, end=' ')
+        print("ep#%4d"%epoch, "count : %4d, scaled_rew : %03.5f total_rew :%03.5f"%(count, total_rew, total_rew_scaled))
         return
 
     def unroll_step(self, buffer):
@@ -104,7 +111,7 @@ class Agent:
             rew_sum+=r
             
         done = buffer[-1].done if len(buffer) == self.n_step else True
-        return StepInfo(buffer[0].obs, buffer[0].act_v, buffer[0].act, buffer[-1].last_obs, rew_sum, done, buffer[0].etc, len(buffer))
+        return StepInfo(buffer[0].obs, buffer[0].act_v, buffer[0].noise_v, buffer[0].act, buffer[-1].last_obs, rew_sum, done, buffer[0].etc, len(buffer))
 
 import numpy as np
 import math
